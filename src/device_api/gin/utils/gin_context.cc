@@ -70,7 +70,7 @@ static ncclResult_t ncclTestGinHostFree(void* ptr) {
  * GIN requirements below, so this guards the remaining case the build system
  * cannot see: a library older than those headers loaded at run time.
  */
-static void checkNcclVersion(void) {
+static int checkNcclVersion(void) {
   int runtimeVersion = 0;
   NCCLCHECK_FATAL(ncclGetVersion(&runtimeVersion));
   if (runtimeVersion < NCCL_VERSION(2, 30, 7)) {
@@ -81,6 +81,7 @@ static void checkNcclVersion(void) {
             NCCL_VERSION_CODE, runtimeVersion);
     MPI_Abort(MPI_COMM_WORLD, 1);
   }
+  return runtimeVersion;
 }
 
 size_t ncclTestGinMaxBufferBytes(void) {
@@ -88,7 +89,13 @@ size_t ncclTestGinMaxBufferBytes(void) {
 }
 
 void ncclTestGinDevCommCreate(ncclComm_t comm, const ginArgs_t* args, ginContext_t* ctx) {
-  checkNcclVersion();
+  const int runtimeVersion = checkNcclVersion();
+  int windowFlags = NCCL_WIN_DEFAULT;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 32, 3)
+  if (runtimeVersion >= NCCL_VERSION(2, 32, 3)) windowFlags = NCCL_WIN_GIN_ONLY;
+#else
+  (void)runtimeVersion;
+#endif
 
   ncclDevCommRequirements_t reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   reqs.ginContextCount = args->numCtas;
@@ -102,12 +109,12 @@ void ncclTestGinDevCommCreate(ncclComm_t comm, const ginArgs_t* args, ginContext
 
   if (args->localMemoryType == ncclGinMemoryHost || args->remoteMemoryType == ncclGinMemoryHost) {
     NCCLCHECK_FATAL(ncclTestGinHostAlloc(&ctx->hostBuf, args->maxBytes));
-    NCCLCHECK_FATAL(ncclCommWindowRegister(comm, ctx->hostBuf, args->maxBytes, &ctx->hostBufWindow, NCCL_WIN_GIN_ONLY));
+    NCCLCHECK_FATAL(ncclCommWindowRegister(comm, ctx->hostBuf, args->maxBytes, &ctx->hostBufWindow, windowFlags));
   }
 
   if (args->localMemoryType == ncclGinMemoryDevice || args->remoteMemoryType == ncclGinMemoryDevice) {
     NCCLCHECK_FATAL(ncclMemAlloc(&ctx->devBuf, args->maxBytes));
-    NCCLCHECK_FATAL(ncclCommWindowRegister(comm, ctx->devBuf, args->maxBytes, &ctx->devBufWindow, NCCL_WIN_GIN_ONLY));
+    NCCLCHECK_FATAL(ncclCommWindowRegister(comm, ctx->devBuf, args->maxBytes, &ctx->devBufWindow, windowFlags));
   }
 }
 
