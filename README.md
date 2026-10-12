@@ -105,6 +105,33 @@ Collective perf tests support the same set of arguments :
   * `-u,--unalign <index of first element>` Misalign source and destination buffers. Default : 0.
   * `-U,--tuning <0/1>` report NCCL tuning information. Requires NCCL 2.28 or newer; symmetric collective identification and kernel variant reporting require NCCL 2.31 or newer. Default : 0.
 
+### AlltoAll hybrid diagnostic control
+
+On Linux with NCCL 2.28.7 or newer and GIN support, `alltoall_perf -D 4`
+uses GIN for remote peers and vectorized LSA copies (with a scalar fallback)
+for local peers. `-D 6` uses the same device-communicator requirements and
+peer mapping, but adds a CTA-cooperative `gin.flush()` after the remote puts
+and before each CTA's local copies. This provides a flush-before-LSA control
+for investigating contention between the two paths. It is a diagnostic mode;
+the extra completion wait removes overlap within each CTA and is not a
+recommended performance optimization.
+
+Compare the modes with the same ranks, effective message size, and CTA count.
+For example, on two nodes with four GPUs each:
+
+```shell
+mpirun -np 8 -H nodeA:4,nodeB:4 --map-by ppr:4:node \
+  ./build/alltoall_perf -t 1 -g 1 -d float -b 512K -e 512K \
+  -R 2 -D 4 -V 32 -n 100 -w 20 -c 5
+# Repeat with -D 6 for the flush-before-LSA control.
+```
+
+This example has 64 KiB per peer (512 KiB total per rank). Both modes request
+one GIN context; increasing `-V` changes the CTA count, not the requested
+context count. `-D 3` is a separate GIN-only comparison that also sends to
+local peers through GIN, so its transport mix differs. AllToAll verification
+covers out-of-place results; the in-place column is not checked.
+
 ### Running multiple operations in parallel
 
 NCCL tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel.
