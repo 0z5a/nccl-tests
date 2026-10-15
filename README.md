@@ -132,6 +132,22 @@ context count. `-D 3` is a separate GIN-only comparison that also sends to
 local peers through GIN, so its transport mix differs. AllToAll verification
 covers out-of-place results; the in-place column is not checked.
 
+### AlltoAll hybrid with lean synchronization
+
+With NCCL 2.30 or newer, `-D 7` is a hybrid variant with the same transport
+split as `-D 4` (GIN for remote peers, the vectorized LSA copy for local peers)
+and one GIN context. It changes how remote traffic is issued and synchronized:
+
+- One warp posts all remote puts, waits for the incoming signals and flushes,
+  instead of spreading puts over CTAs and flushing in every CTA.
+- Each peer's block is sent as `min(4, ceil(bytes per peer / 4 MiB))` puts.
+- Only the CTA that writes to remote peers runs a GIN world barrier at the
+  start; every CTA runs an LSA barrier for same-node peers. At the end, the
+  signal wait covers remote data, so only the LSA barrier is used, instead of
+  a combined LSA+GIN barrier at both ends.
+
+Run it like `-D 4`, for example `-R 2 -D 7 -V 32`.
+
 ### Running multiple operations in parallel
 
 NCCL tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel.
